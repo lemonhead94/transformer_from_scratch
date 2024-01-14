@@ -1,0 +1,10 @@
+{
+    "[python]": {
+      "editor.defaultFormatter": "ms-python.black-formatter",
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.fixAll": "always",
+      },
+    },
+    "ruff.lint.args": ["--select=E,W,F,I001,PL", "--ignore=E203", "--per-file-ignores=**/__init__.py:F401"]
+}
