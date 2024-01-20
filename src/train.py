@@ -446,5 +446,7 @@ if __name__ == "__main__":
     # set log level to info
     logging.basicConfig(level=logging.INFO)
     config = get_config()
-    wandb.init(project="BERT_from_scratch", config=config)
+    wandb.init(
+        project="BERT_from_scratch", entity="jorit-studer", config=config
+    )
     train_model(config=config)

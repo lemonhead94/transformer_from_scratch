@@ -1,8 +1,11 @@
+import logging
 from typing import Any, Dict
 
 import torch
 from tokenizers import Tokenizer
 from torch.utils.data import Dataset
+
+logger = logging.getLogger(__name__)
 
 
 class BilingualDataset(Dataset):
@@ -55,27 +58,46 @@ class BilingualDataset(Dataset):
             - 1  # only sos token
         )
 
+        # Make sure the number of padding tokens is not negative.
+        # If it is, the sentence is too long
         if (
             encoder_number_paddding_tokens < 0
             or decoder_number_paddding_tokens < 0
         ):
-            raise ValueError("Sequence length is too short.")
+            logger.error("Sentence is too long")
+            logger.error(f"Source text: {source_text}")
+            logger.error(f"Target text: {target_text}")
+            logger.error(f"Encoder input tokens: {encoder_input_tokens}")
+            logger.error(f"Decoder input tokens: {decoder_input_tokens}")
+            logger.error(
+                f"Encoder padding tokens: {encoder_number_paddding_tokens}"
+            )
+            logger.error(
+                f"Decoder padding tokens: {decoder_number_paddding_tokens}"
+            )
+            raise ValueError("Sentence is too long")
 
         encoder_input = torch.cat(
             [
                 self.sos_token,
                 torch.tensor(encoder_input_tokens, dtype=torch.int64),
                 self.eos_token,
-                self.pad_token.repeat(encoder_number_paddding_tokens),
-            ]
+                self.pad_token.repeat(encoder_number_paddding_tokens).type(
+                    torch.int64
+                ),
+            ],
+            dim=0,
         )
 
         decoder_input = torch.cat(
             [
                 self.sos_token,
                 torch.tensor(decoder_input_tokens, dtype=torch.int64),
-                self.pad_token.repeat(decoder_number_paddding_tokens),
-            ]
+                self.pad_token.repeat(decoder_number_paddding_tokens).type(
+                    torch.int64
+                ),
+            ],
+            dim=0,
         )
 
         # what we expect as output from the decoder
@@ -83,8 +105,11 @@ class BilingualDataset(Dataset):
             [
                 torch.tensor(decoder_input_tokens, dtype=torch.int64),
                 self.eos_token,
-                self.pad_token.repeat(decoder_number_paddding_tokens),
-            ]
+                self.pad_token.repeat(decoder_number_paddding_tokens).type(
+                    torch.int64
+                ),
+            ],
+            dim=0,
         )
 
         assert len(encoder_input) == self.sequence_length

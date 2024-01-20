@@ -161,3 +161,4 @@ cython_debug/
 
 tokenizer_data/*
 runs/*
+wandb/*
