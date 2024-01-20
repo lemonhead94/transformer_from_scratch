@@ -20,7 +20,7 @@ class InputEmbeddings(nn.Module):
         )  # paper suggests to scale by sqrt(d_model)
 
 
-class PositionalEncodding(nn.Module):
+class PositionalEncoding(nn.Module):
     def __init__(
         self, d_model: int, sequence_length: int, dropout: float
     ) -> None:
@@ -303,9 +303,9 @@ class Transformer(nn.Module):
         encoder: Encoder,
         decoder: Decoder,
         source_embed: InputEmbeddings,
-        source_pos: PositionalEncodding,
+        source_pos: PositionalEncoding,
         target_embed: InputEmbeddings,
-        target_pos: PositionalEncodding,
+        target_pos: PositionalEncoding,
         projection_layer: ProjectionLayer,
     ) -> None:
         super().__init__()
@@ -365,10 +365,10 @@ def build_transformer(
     )
 
     # Create the positional encoding layers
-    source_pos = PositionalEncodding(
+    source_pos = PositionalEncoding(
         d_model=d_model, sequence_length=sequence_length, dropout=dropout
     )
-    target_pos = PositionalEncodding(
+    target_pos = PositionalEncoding(
         d_model=d_model,
         sequence_length=target_sequence_length,
         dropout=dropout,
