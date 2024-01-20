@@ -44,7 +44,16 @@ def greedy_docode(
         .type_as(source)
         .to(device)
     )
+    if logger.isEnabledFor(logging.INFO):
+        logger.info("Starting to greedy decode...")
+        greedy_docode_counter = 0
     while True:
+        if logger.isEnabledFor(logging.INFO):
+            # every 50 steps print a message
+            greedy_docode_counter += 1
+            if greedy_docode_counter % 50 == 0:
+                logger.info(f"Greedy decoding step: {greedy_docode_counter}")
+
         if decoder_input.size(1) == max_len:
             break
 
