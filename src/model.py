@@ -5,17 +5,17 @@ import torch
 from torch import nn
 
 
-class InputEmbeddings(nn.Module):
+class InputEmbedding(nn.Module):
     def __init__(self, d_model: int, vocab_size: int) -> None:
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
-        self.embeddings = nn.Embedding(
+        self.embedding = nn.Embedding(
             num_embeddings=vocab_size, embedding_dim=d_model
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.embeddings(input) * math.sqrt(
+        return self.embedding(input) * math.sqrt(
             self.d_model
         )  # paper suggests to scale by sqrt(d_model)
 
@@ -89,17 +89,19 @@ class FeedForwardBlock(nn.Module):
 
 
 class MultiHeadAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, dropout: float) -> None:
+    def __init__(
+        self, d_model: int, number_of_heads: int, dropout: float
+    ) -> None:
         super().__init__()
         self.d_model = d_model
-        self.num_heads = num_heads
+        self.number_of_heads = number_of_heads
         self.dropout = nn.Dropout(dropout)
 
         assert (
-            d_model % num_heads == 0
-        ), "d_model must be a multiple of num_heads"
+            d_model % number_of_heads == 0
+        ), "d_model must be a multiple of number_of_heads"
 
-        self.d_k = d_model // num_heads
+        self.d_k = d_model // number_of_heads
         self.w_q = nn.Linear(in_features=d_model, out_features=d_model)
         self.w_k = nn.Linear(in_features=d_model, out_features=d_model)
         self.w_v = nn.Linear(in_features=d_model, out_features=d_model)
@@ -124,7 +126,7 @@ class MultiHeadAttentionBlock(nn.Module):
             )
         attention_scores = torch.softmax(
             attention_scores, dim=-1
-        )  # (Batch, num_heads, sequence_length, sequence_length)
+        )  # (Batch, number_of_heads, sequence_length, sequence_length)
         if dropout is not None:
             attention_scores = dropout(attention_scores)
 
@@ -142,13 +144,13 @@ class MultiHeadAttentionBlock(nn.Module):
         value = self.w_v(value)
 
         query = query.view(
-            query.shape[0], query.shape[1], self.num_heads, self.d_k
+            query.shape[0], query.shape[1], self.number_of_heads, self.d_k
         ).transpose(dim0=1, dim1=2)
         key = key.view(
-            key.shape[0], key.shape[1], self.num_heads, self.d_k
+            key.shape[0], key.shape[1], self.number_of_heads, self.d_k
         ).transpose(dim0=1, dim1=2)
         value = value.view(
-            value.shape[0], value.shape[1], self.num_heads, self.d_k
+            value.shape[0], value.shape[1], self.number_of_heads, self.d_k
         ).transpose(dim0=1, dim1=2)
 
         x, self.attention_scores = MultiHeadAttentionBlock.attention(
@@ -158,7 +160,7 @@ class MultiHeadAttentionBlock(nn.Module):
         x = (
             x.transpose(dim0=1, dim1=2)
             .contiguous()
-            .view(x.shape[0], -1, self.num_heads * self.d_k)
+            .view(x.shape[0], -1, self.number_of_heads * self.d_k)
         )
         return self.w_o(x)
 
@@ -237,7 +239,7 @@ class DecoderBlock(nn.Module):
     def forward(
         self,
         input: torch.Tensor,
-        encoder_output: torch.Tensor,
+        encoder_output: torch.Tensor,  # aka source
         source_mask: torch.Tensor,  # from encoder, to mask the source sequence
         target_mask: torch.Tensor,  # from decoder, to mask the target sequence
     ) -> torch.Tensor:
@@ -302,26 +304,26 @@ class Transformer(nn.Module):
         self,
         encoder: Encoder,
         decoder: Decoder,
-        source_embed: InputEmbeddings,
-        source_pos: PositionalEncoding,
-        target_embed: InputEmbeddings,
-        target_pos: PositionalEncoding,
+        source_embedding: InputEmbedding,
+        source_positional_encoding: PositionalEncoding,
+        target_embedding: InputEmbedding,
+        target_positional_encoding: PositionalEncoding,
         projection_layer: ProjectionLayer,
     ) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.source_embed = source_embed
-        self.target_embed = target_embed
-        self.source_pos = source_pos
-        self.target_pos = target_pos
+        self.source_embedding = source_embedding
+        self.target_embedding = target_embedding
+        self.source_positional_encoding = source_positional_encoding
+        self.target_positional_encoding = target_positional_encoding
         self.projection_layer = projection_layer
 
     def encode(
         self, source: torch.Tensor, source_mask: torch.Tensor
     ) -> torch.Tensor:
-        source = self.source_embed(source)
-        source = self.source_pos(source)
+        source = self.source_embedding(source)
+        source = self.source_positional_encoding(source)
         return self.encoder(input=source, mask=source_mask)
 
     def decode(
@@ -331,8 +333,8 @@ class Transformer(nn.Module):
         target: torch.Tensor,
         target_mask: torch.Tensor,
     ) -> torch.Tensor:
-        target = self.target_embed(target)
-        target = self.target_pos(target)
+        target = self.target_embedding(target)
+        target = self.target_positional_encoding(target)
         return self.decoder(
             input=target,
             encoder_output=encoder_output,
@@ -350,25 +352,25 @@ def build_transformer(
     sequence_length: int,
     target_sequence_length: int,
     d_model: int = 512,
-    num_heads: int = 8,
+    number_of_heads: int = 8,
     dropout: float = 0.1,
-    num_encoder_layers: int = 6,
+    number_of_encoder_layers: int = 6,
     d_ff: int = 2048,
-    num_decoder_layers: int = 6,
+    number_of_decoder_layers: int = 6,
 ) -> Transformer:
     # Create the embedding layers
-    source_embed = InputEmbeddings(
+    source_embedding = InputEmbedding(
         d_model=d_model, vocab_size=source_vocab_size
     )
-    target_embed = InputEmbeddings(
+    target_embedding = InputEmbedding(
         d_model=d_model, vocab_size=target_vocab_size
     )
 
     # Create the positional encoding layers
-    source_pos = PositionalEncoding(
+    source_positional_encoding = PositionalEncoding(
         d_model=d_model, sequence_length=sequence_length, dropout=dropout
     )
-    target_pos = PositionalEncoding(
+    target_positional_encoding = PositionalEncoding(
         d_model=d_model,
         sequence_length=target_sequence_length,
         dropout=dropout,
@@ -376,9 +378,9 @@ def build_transformer(
 
     # Create the encoder blocks
     encoder_blocks = []
-    for _ in range(num_encoder_layers):
+    for _ in range(number_of_encoder_layers):
         encoder_self_attention_block = MultiHeadAttentionBlock(
-            d_model=d_model, num_heads=num_heads, dropout=dropout
+            d_model=d_model, number_of_heads=number_of_heads, dropout=dropout
         )
         feed_forward_block = FeedForwardBlock(
             d_model=d_model, d_ff=d_ff, dropout=dropout
@@ -392,12 +394,12 @@ def build_transformer(
 
     # Create the decoder blocks
     decoder_blocks = []
-    for _ in range(num_decoder_layers):
+    for _ in range(number_of_decoder_layers):
         decoder_self_attention_block = MultiHeadAttentionBlock(
-            d_model=d_model, num_heads=num_heads, dropout=dropout
+            d_model=d_model, number_of_heads=number_of_heads, dropout=dropout
         )
         decoder_cross_attention_block = MultiHeadAttentionBlock(
-            d_model=d_model, num_heads=num_heads, dropout=dropout
+            d_model=d_model, number_of_heads=number_of_heads, dropout=dropout
         )
         feed_forward_block = FeedForwardBlock(
             d_model=d_model, d_ff=d_ff, dropout=dropout
@@ -423,10 +425,10 @@ def build_transformer(
     transformer = Transformer(
         encoder=encoder,
         decoder=decoder,
-        source_embed=source_embed,
-        source_pos=source_pos,
-        target_embed=target_embed,
-        target_pos=target_pos,
+        source_embedding=source_embedding,
+        source_positional_encoding=source_positional_encoding,
+        target_embedding=target_embedding,
+        target_positional_encoding=target_positional_encoding,
         projection_layer=projection_layer,
     )
 

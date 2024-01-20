@@ -274,7 +274,7 @@ def get_model(
         source_vocab_size=source_vocab_size,
         target_vocab_size=target_vocab_size,
         sequence_length=int(config["sequence_length"]),
-        target_sequence_len=int(config["sequence_length"]),
+        target_sequence_length=int(config["sequence_length"]),
         d_model=int(config["d_model"]),
     )
     return model
