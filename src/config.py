@@ -6,9 +6,9 @@ def get_config():
     return {
         "batch_size": 8,
         "number_of_epochs": 20,
-        "learning_rate": 10 ** -4,
+        "learning_rate": 10**-4,
         "sequence_length": 350,
-        "d_model": 512,
+        "embedding_dimension": 512,
         "source_language": "de",
         "target_language": "en",
         "model_folder": "weights",
