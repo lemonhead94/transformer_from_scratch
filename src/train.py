@@ -32,15 +32,15 @@ def greedy_docode(
     device: torch.device,
 ):
     # these token ids are the same for both tokenizers (source and target)
-    start_of_sentence_idx = target_tokenizer.token_to_id("[SOS]")
-    end_of_sentence_idx = target_tokenizer.token_to_id("[EOS]")
+    start_of_sentence_index = target_tokenizer.token_to_id("[SOS]")
+    end_of_sentence_index = target_tokenizer.token_to_id("[EOS]")
 
     # Precompute the encoder output and resuse it
     encoder_output = model.encode(source=source, source_mask=source_mask)
     # Initalize the decoder input with the start of sentence token
     decoder_input = (
         torch.empty(1, 1)
-        .fill_(start_of_sentence_idx)
+        .fill_(start_of_sentence_index)
         .type_as(source)
         .to(device)
     )
@@ -54,15 +54,17 @@ def greedy_docode(
         )
         # Calculate the output of the decoder
         decoder_output = model.decode(
-            target=decoder_input,
             encoder_output=encoder_output,
             source_mask=source_mask,
+            target=decoder_input,
             target_mask=decoder_mask,
         )
         # get the next token, after the last token we have given to the encoder
-        probabilities_of_next_token = model.project(input=decoder_output[:-1])
+        probabilities_of_next_token = model.project(
+            input=decoder_output[:, -1]
+        )
         # select the token with the highest probability (greedy search)
-        _, next_token = torch.max(probabilities_of_next_token, dim=-1)
+        _, next_token = torch.max(probabilities_of_next_token, dim=1)
         decoder_input = torch.cat(
             [
                 decoder_input,
@@ -74,7 +76,7 @@ def greedy_docode(
             dim=1,
         )
 
-        if next_token == end_of_sentence_idx:
+        if next_token == end_of_sentence_index:
             break
 
     return decoder_input.squeeze(0)
@@ -113,7 +115,7 @@ def run_validation(
             encoder_input = batch["encoder_input"].to(device)
             encoder_mask = batch["encoder_mask"].to(device)
 
-            assert encoder_input.shape[0] == 1, "Only one sentence at a time"
+            assert encoder_input.size(0) == 1, "Only one sentence at a time"
 
             model_output = greedy_docode(
                 model=model,
@@ -123,8 +125,8 @@ def run_validation(
                 max_len=max_len,
                 device=device,
             )
-            source_text = batch["src_text"][0]
-            target_text = batch["tgt_text"][0]
+            source_text = batch["source_text"][0]
+            target_text = batch["target_text"][0]
             model_output_text = target_tokenizer.decode(
                 model_output.detach().cpu().numpy()
             )
@@ -269,7 +271,7 @@ def get_model(
     model = build_transformer(
         source_vocab_size=source_vocab_size,
         target_vocab_size=target_vocab_size,
-        source_len=int(config["sequence_length"]),
+        sequence_length=int(config["sequence_length"]),
         target_sequence_len=int(config["sequence_length"]),
         d_model=int(config["d_model"]),
     )
