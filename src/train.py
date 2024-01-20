@@ -4,15 +4,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 import torch
+import wandb
 from datasets import load_dataset
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import WordLevelTrainer
 from torch import nn
-from torch.utils.data import Dataset, random_split
-from torch.utils.data.dataloader import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, Dataset, random_split
 from torchmetrics.text import BLEUScore, CharErrorRate, WordErrorRate
 from tqdm import tqdm
 
@@ -99,7 +98,6 @@ def run_validation(
     device: torch.device,
     print_message: Callable,
     global_step: int,
-    writer: SummaryWriter,
     number_of_examples: int = 2,
 ):
     model.eval()
@@ -151,29 +149,34 @@ def run_validation(
             print_message(f"Predicted: {model_output_text}")
 
             if count == number_of_examples:
+                print_message("-" * console_width)
                 break
-    if writer:
-        # Evaluate the character error rate
-        # Compute the char error rate
-        cer = CharErrorRate()
-        writer.add_scalar(
-            "validation cer", cer(predicted, expected), global_step
-        )
-        writer.flush()
 
-        # Compute the word error rate
-        wer = WordErrorRate()
-        writer.add_scalar(
-            "validation wer", wer(predicted, expected), global_step
-        )
-        writer.flush()
+    cer = CharErrorRate()
+    wandb.log(
+        {
+            "validation/CharErrorRate": cer(predicted, expected),
+            "global_step": global_step,
+        }
+    )
 
-        # Compute the BLEU metric
-        bleu = BLEUScore()
-        writer.add_scalar(
-            "validation BLEU", bleu(predicted, expected), global_step
-        )
-        writer.flush()
+    # Compute the word error rate
+    wer = WordErrorRate()
+    wandb.log(
+        {
+            "validation/WordErrorRate": wer(predicted, expected),
+            "global_step": global_step,
+        }
+    )
+
+    # Compute the BLEU metric
+    bleu = BLEUScore()
+    wandb.log(
+        {
+            "validation/BLEUScore": bleu(predicted, expected),
+            "global_step": global_step,
+        }
+    )
 
 
 def get_all_sentences(dataset, language):
@@ -282,7 +285,7 @@ def get_model(
     model = build_transformer(
         source_vocab_size=source_vocab_size,
         target_vocab_size=target_vocab_size,
-        sequence_length=int(config["sequence_length"]),
+        source_sequence_length=int(config["sequence_length"]),
         target_sequence_length=int(config["sequence_length"]),
         embedding_dimension=int(config["embedding_dimension"]),
     )
@@ -323,8 +326,6 @@ def train_model(config: Dict[str, str]):
         source_vocab_size=source_tokenizer.get_vocab_size(),
         target_vocab_size=target_tokenizer.get_vocab_size(),
     ).to(device)
-    # Tensorboard
-    writer = SummaryWriter(log_dir=config["experiment_name"])
 
     optimizer = torch.optim.Adam(
         model.parameters(), lr=float(config["learning_rate"]), eps=1e-9
@@ -341,26 +342,33 @@ def train_model(config: Dict[str, str]):
         initial_epoch = state["epoch"] + 1
         optimizer.load_state_dict(state["optimizer_state_dict"])
         global_step = state["global_step"]
+        del state
 
     loss_fn = nn.CrossEntropyLoss(
         ignore_index=source_tokenizer.token_to_id("[PAD]"), label_smoothing=0.1
     ).to(device)
 
+    # define our custom x axis metric
+    wandb.define_metric("global_step")
+    # define which metrics will be plotted against it
+    wandb.define_metric("validation/*", step_metric="global_step")
+    wandb.define_metric("train/*", step_metric="global_step")
+
     for epoch in range(initial_epoch, int(config["number_of_epochs"])):
+        torch.cuda.empty_cache()
+        model.train()
         batch_iterator = tqdm(
             train_dataloader,
             desc=f"Processing epoch {epoch:02d}",
             total=len(train_dataloader),
         )
         for batch in batch_iterator:
-            model.train()
-
             encoder_input = batch["encoder_input"].to(device)
             decoder_input = batch["decoder_input"].to(device)
             encoder_mask = batch["encoder_mask"].to(device)
             decoder_mask = batch["decoder_mask"].to(device)
 
-            # Run the tensors through the transformer
+            # Run the tensors through the encoder, decoder and projection layer
             encoder_output = model.encode(
                 source=encoder_input, source_mask=encoder_mask
             )
@@ -381,21 +389,17 @@ def train_model(config: Dict[str, str]):
             batch_iterator.set_postfix({"loss": f"{loss.item():6.3f}"})
 
             # Log the loss to tensorboard
-            writer.add_scalar(
-                tag="train loss",
-                scalar_value=loss.item(),
-                global_step=global_step,
-            )
-            writer.flush()
+            wandb.log({"train/loss": loss.item(), "global_step": global_step})
 
             # Backpropagation
             loss.backward()
 
             # Update the weights
             optimizer.step()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
+
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("DEBUG: run_validation")
+                logger.debug("run_validation")
                 # run validation after each step
                 run_validation(
                     model=model,
@@ -405,7 +409,6 @@ def train_model(config: Dict[str, str]):
                     device=device,
                     print_message=batch_iterator.write,
                     global_step=global_step,
-                    writer=writer,
                 )
 
             # Update the global step
@@ -420,7 +423,6 @@ def train_model(config: Dict[str, str]):
             device=device,
             print_message=batch_iterator.write,
             global_step=global_step,
-            writer=writer,
         )
 
         # Save the model
@@ -444,4 +446,5 @@ if __name__ == "__main__":
     # set log level to info
     logging.basicConfig(level=logging.INFO)
     config = get_config()
+    wandb.init(project="BERT_from_scratch", config=config)
     train_model(config=config)

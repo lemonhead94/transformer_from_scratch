@@ -5,6 +5,51 @@ import torch
 from torch import nn
 
 
+class LayerNormalization(nn.Module):
+    def __init__(self, features: int, epsilon: float = 10**-6) -> None:
+        super().__init__()
+        self.epsilon = epsilon  # for numerical stability
+        self.alpha = nn.Parameter(
+            data=torch.ones(features)
+        )  # multiplicative parameter
+        self.bias = nn.Parameter(
+            data=torch.zeros(features)
+        )  # additive parameter
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        mean = input.mean(dim=-1, keepdim=True)
+        std = input.std(dim=-1, keepdim=True)
+        return self.alpha * (input - mean) / (std + self.epsilon) + self.bias
+
+
+class FeedForwardBlock(nn.Module):
+    def __init__(
+        self,
+        embedding_dimension: int,
+        feedforward_hidden_layer_size: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.linear1 = nn.Linear(
+            in_features=embedding_dimension,
+            out_features=feedforward_hidden_layer_size,
+        )  # W1 and B1
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(
+            in_features=feedforward_hidden_layer_size,
+            out_features=embedding_dimension,
+        )  # W2 and B2
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # (Batch, sequence_length, embedding_dimension)
+        # -> (Batch, sequence_length, feedforward_hidden_layer_size)
+        # -> (Batch, sequence_length, embedding_dimension)
+        linear1_output = self.linear1(input)
+        relu_output = torch.relu(linear1_output)
+        drop_output = self.dropout(relu_output)
+        return self.linear2(drop_output)
+
+
 class InputEmbedding(nn.Module):
     def __init__(self, embedding_dimension: int, vocab_size: int) -> None:
         super().__init__()
@@ -15,6 +60,8 @@ class InputEmbedding(nn.Module):
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # (batch, sequence_length)
+        # --> (batch, sequence_length, embedding_dimension)
         # paper suggests to scale by sqrt(embedding_dimension)
         return self.embedding(input) * math.sqrt(self.embedding_dimension)
 
@@ -47,53 +94,25 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("positional_encoding", positional_encoding)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        pos_enc = input + (
+        positional_encoded_input = input + (
             self.positional_encoding[:, : input.shape[1], :]
         ).requires_grad_(False)
-        return self.dropout(pos_enc)
+        return self.dropout(positional_encoded_input)
 
 
-class LayerNormalization(nn.Module):
-    def __init__(self, epsilon: float = 10**-6) -> None:
+class ResidualConnection(nn.Module):
+    def __init__(self, features: int, dropout: float) -> None:
         super().__init__()
-        self.epsilon = epsilon  # for numerical stability
-        self.alpha = nn.Parameter(
-            data=torch.ones(1)
-        )  # multiplicative parameter
-        self.beta = nn.Parameter(data=torch.zeros(1))  # additive parameter
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        mean = input.mean(dim=-1, keepdim=True)
-        std = input.std(dim=-1, keepdim=True)
-        return self.alpha * (input - mean) / (std + self.epsilon) + self.beta
-
-
-class FeedForwardBlock(nn.Module):
-    def __init__(
-        self,
-        embedding_dimension: int,
-        feedforward_hidden_layer_size: int,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        self.linear1 = nn.Linear(
-            in_features=embedding_dimension,
-            out_features=feedforward_hidden_layer_size,
-        )  # W1 and B1
+        self.layer_normalization = LayerNormalization(features=features)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(
-            in_features=feedforward_hidden_layer_size,
-            out_features=embedding_dimension,
-        )  # W2 and B2
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # (Batch, sequence_length, embedding_dimension)
-        # -> (Batch, sequence_length, feedforward_hidden_layer_size)
-        # -> (Batch, sequence_length, embedding_dimension)
-        lin1_out = self.linear1(input)
-        relu_out = torch.relu(lin1_out)
-        drop_out = self.dropout(relu_out)
-        return self.linear2(drop_out)
+    def forward(
+        self, input: torch.Tensor, sublayer: nn.Module
+    ) -> torch.Tensor:
+        # The sublayer is either the MultiHeadAttentionBlock
+        # or the FeedForwardBlock, both of which are nn.Module
+        # We do this to apply skip connection to both of them
+        return input + self.dropout(sublayer(self.layer_normalization(input)))
 
 
 class MultiHeadAttentionBlock(nn.Module):
@@ -109,7 +128,9 @@ class MultiHeadAttentionBlock(nn.Module):
             embedding_dimension % number_of_heads == 0
         ), "embedding_dimension must be a multiple of number_of_heads"
 
-        self.d_k = embedding_dimension // number_of_heads
+        self.d_k = (
+            embedding_dimension // number_of_heads
+        )  # Dimension of vector seen by each head
         self.w_q = nn.Linear(
             in_features=embedding_dimension, out_features=embedding_dimension
         )
@@ -137,6 +158,7 @@ class MultiHeadAttentionBlock(nn.Module):
             query @ key.transpose(dim0=-2, dim1=-1)
         ) / math.sqrt(d_k)
         if mask is not None:
+            # Write a very low value (-inf) to the positions where mask == 0
             attention_scores = attention_scores.masked_fill(
                 mask=(mask == 0), value=-1e9
             )
@@ -169,36 +191,28 @@ class MultiHeadAttentionBlock(nn.Module):
             value.shape[0], value.shape[1], self.number_of_heads, self.d_k
         ).transpose(dim0=1, dim1=2)
 
-        x, self.attention_scores = MultiHeadAttentionBlock.attention(
+        (
+            context_vector,
+            self.attention_scores,
+        ) = MultiHeadAttentionBlock.attention(
             query=query, key=key, value=value, mask=mask, dropout=self.dropout
         )
 
-        x = (
-            x.transpose(dim0=1, dim1=2)
+        # concatenate the weights of all heads
+        context_vector = (
+            context_vector.transpose(dim0=1, dim1=2)
             .contiguous()
-            .view(x.shape[0], -1, self.number_of_heads * self.d_k)
+            .view(context_vector.shape[0], -1, self.number_of_heads * self.d_k)
         )
-        return self.w_o(x)
-
-
-class ResidualConnection(nn.Module):
-    def __init__(self, dropout: float) -> None:
-        super().__init__()
-        self.norm = LayerNormalization()
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(
-        self, input: torch.Tensor, sublayer: nn.Module
-    ) -> torch.Tensor:
-        # The sublayer is either the MultiHeadAttentionBlock
-        # or the FeedForwardBlock, both of which are nn.Module
-        # We do this to apply skip connection to both of them
-        return input + self.dropout(sublayer(self.norm(input)))
+        # project this high-dimensional vector back down to the
+        # original embedding dimension
+        return self.w_o(context_vector)
 
 
 class EncoderBlock(nn.Module):
     def __init__(
         self,
+        features: int,
         self_attention_block: MultiHeadAttentionBlock,
         feed_forward_block: FeedForwardBlock,
         dropout: float,
@@ -207,7 +221,10 @@ class EncoderBlock(nn.Module):
         self.attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
         self.residual_connections = nn.ModuleList(
-            modules=[ResidualConnection(dropout=dropout) for _ in range(2)]
+            modules=[
+                ResidualConnection(features=features, dropout=dropout)
+                for _ in range(2)
+            ]
         )
 
     def forward(
@@ -225,22 +242,23 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, layers: nn.ModuleList) -> None:
+    def __init__(self, features: int, layers: nn.ModuleList) -> None:
         super().__init__()
         self.layers = layers
-        self.norm = LayerNormalization()
+        self.layer_normalization = LayerNormalization(features=features)
 
     def forward(
         self, input: torch.Tensor, source_mask: torch.Tensor
     ) -> torch.Tensor:
         for layer in self.layers:
             input = layer(input=input, source_mask=source_mask)
-        return self.norm(input)
+        return self.layer_normalization(input)
 
 
 class DecoderBlock(nn.Module):
     def __init__(
         self,
+        features: int,
         self_attention_block: MultiHeadAttentionBlock,
         cross_attention_block: MultiHeadAttentionBlock,
         feed_forward_block: FeedForwardBlock,
@@ -251,7 +269,10 @@ class DecoderBlock(nn.Module):
         self.cross_attention_block = cross_attention_block
         self.feed_forward_block = feed_forward_block
         self.residual_connections = nn.ModuleList(
-            modules=[ResidualConnection(dropout=dropout) for _ in range(3)]
+            modules=[
+                ResidualConnection(features=features, dropout=dropout)
+                for _ in range(3)
+            ]
         )
 
     def forward(
@@ -282,10 +303,10 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, layers: nn.ModuleList) -> None:
+    def __init__(self, features: int, layers: nn.ModuleList) -> None:
         super().__init__()
         self.layers = layers
-        self.norm = LayerNormalization()
+        self.layer_normalization = LayerNormalization(features=features)
 
     def forward(
         self,
@@ -301,21 +322,20 @@ class Decoder(nn.Module):
                 source_mask=source_mask,
                 target_mask=target_mask,
             )  # calling the forward method of DecoderBlock
-        return self.norm(input)
+        return self.layer_normalization(input)
 
 
 class ProjectionLayer(nn.Module):
     def __init__(self, embedding_dimension: int, vocab_size: int) -> None:
         super().__init__()
-        self.embedding_dimension = embedding_dimension
-        self.vocab_size = vocab_size
-        self.linear = nn.Linear(
+        self.linear_projection = nn.Linear(
             in_features=embedding_dimension, out_features=vocab_size
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # log_softmax for numerical stability
-        return torch.log_softmax(input=self.linear(input), dim=-1)
+        # (batch, sequence_length, embedding_dimension)
+        # --> (batch, sequence_length, vocab_size)
+        return self.linear_projection(input)
 
 
 class Transformer(nn.Module):
@@ -374,7 +394,7 @@ class Transformer(nn.Module):
 def build_transformer(
     source_vocab_size: int,
     target_vocab_size: int,
-    sequence_length: int,
+    source_sequence_length: int,
     target_sequence_length: int,
     embedding_dimension: int = 512,
     number_of_heads: int = 8,
@@ -394,7 +414,7 @@ def build_transformer(
     # Create the positional encoding layers
     source_positional_encoder = PositionalEncoding(
         embedding_dimension=embedding_dimension,
-        sequence_length=sequence_length,
+        sequence_length=source_sequence_length,
         dropout=dropout,
     )
     target_positional_encoder = PositionalEncoding(
@@ -417,6 +437,7 @@ def build_transformer(
             dropout=dropout,
         )
         encoder_block = EncoderBlock(
+            features=embedding_dimension,
             self_attention_block=encoder_self_attention_block,
             feed_forward_block=feed_forward_block,
             dropout=dropout,
@@ -442,6 +463,7 @@ def build_transformer(
             dropout=dropout,
         )
         decoder_block = DecoderBlock(
+            features=embedding_dimension,
             self_attention_block=decoder_self_attention_block,
             cross_attention_block=decoder_cross_attention_block,
             feed_forward_block=feed_forward_block,
@@ -450,8 +472,14 @@ def build_transformer(
         decoder_blocks.append(decoder_block)
 
     # Create the encoder and decoder
-    encoder = Encoder(layers=nn.ModuleList(modules=encoder_blocks))
-    decoder = Decoder(layers=nn.ModuleList(modules=decoder_blocks))
+    encoder = Encoder(
+        features=embedding_dimension,
+        layers=nn.ModuleList(modules=encoder_blocks),
+    )
+    decoder = Decoder(
+        features=embedding_dimension,
+        layers=nn.ModuleList(modules=decoder_blocks),
+    )
 
     # Create the projection layer
     projection_layer = ProjectionLayer(
@@ -470,8 +498,8 @@ def build_transformer(
     )
 
     # Initialize the parameters with xaiver uniform
-    for p in transformer.parameters():
-        if p.dim() > 1:
-            nn.init.xavier_uniform_(p)
+    for parameter in transformer.parameters():
+        if parameter.dim() > 1:
+            nn.init.xavier_uniform_(parameter)
 
     return transformer
