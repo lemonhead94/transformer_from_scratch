@@ -348,7 +348,7 @@ def build_transformer(
     source_vocab_size: int,
     target_vocab_size: int,
     sequence_length: int,
-    target_sequence_len: int,
+    target_sequence_length: int,
     d_model: int = 512,
     num_heads: int = 8,
     dropout: float = 0.1,
@@ -369,7 +369,9 @@ def build_transformer(
         d_model=d_model, sequence_length=sequence_length, dropout=dropout
     )
     target_pos = PositionalEncodding(
-        d_model=d_model, sequence_length=target_sequence_len, dropout=dropout
+        d_model=d_model,
+        sequence_length=target_sequence_length,
+        dropout=dropout,
     )
 
     # Create the encoder blocks

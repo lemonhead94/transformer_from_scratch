@@ -109,7 +109,9 @@ def run_validation(
         # If we can't get the console width, use 80 as default
         console_width = 80
 
-    with torch.no_grad():  # don't train the model i.e. calculate gradients only do the forward pass (inference)
+    # don't train the model
+    # i.e. calculate gradients only do the forward pass (inference)
+    with torch.no_grad():
         for batch in validation_dataloader:
             count += 1
             encoder_input = batch["encoder_input"].to(device)
@@ -292,9 +294,11 @@ def train_model(config: Dict[str, str]):
         logger.info(
             f"Device name: {torch.cuda.get_device_name(device=device_type)}"
         )
-        logger.info(
-            f"Device memory: {torch.cuda.get_device_properties(device=device_type).total_memory / 1024 ** 3} GB"
+        memory = (
+            torch.cuda.get_device_properties(device=device_type).total_memory
+            / 1024**3
         )
+        logger.info(f"Device memory: {memory} GB")
     device = torch.device(device_type)
 
     Path(config["model_folder"]).mkdir(parents=True, exist_ok=True)
