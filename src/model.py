@@ -27,7 +27,7 @@ class PositionalEncodding(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.sequence_length = sequence_length
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dropout)
 
         positional_encoding = torch.zeros(sequence_length, d_model)
         position = torch.arange(
@@ -73,7 +73,7 @@ class FeedForwardBlock(nn.Module):
         self.linear1 = nn.Linear(
             in_features=d_model, out_features=d_ff
         )  # W1 and B1
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(
             in_features=d_ff, out_features=d_model
         )  # W2 and B2
@@ -93,7 +93,7 @@ class MultiHeadAttentionBlock(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dropout)
 
         assert (
             d_model % num_heads == 0
@@ -167,7 +167,7 @@ class ResidualConnection(nn.Module):
     def __init__(self, dropout: float) -> None:
         super().__init__()
         self.norm = LayerNormalization()
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
         self, input: torch.Tensor, sublayer: nn.Module
@@ -193,12 +193,12 @@ class EncoderBlock(nn.Module):
         )
 
     def forward(
-        self, input: torch.Tensor, src_mask: torch.Tensor
+        self, input: torch.Tensor, source_mask: torch.Tensor
     ) -> torch.Tensor:
         input = self.residual_connections[0](
             input=input,
             sublayer=lambda input: self.attention_block(
-                query=input, key=input, value=input, mask=src_mask
+                query=input, key=input, value=input, mask=source_mask
             ),  # calling the forward method of MultiHeadAttentionBlock
         )
         return self.residual_connections[1](
@@ -214,7 +214,7 @@ class Encoder(nn.Module):
 
     def forward(self, input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
-            input = layer(input=input, src_mask=mask)
+            input = layer(input=input, source_mask=mask)
         return self.norm(input)
 
 
@@ -238,7 +238,7 @@ class DecoderBlock(nn.Module):
         self,
         input: torch.Tensor,
         encoder_output: torch.Tensor,
-        src_mask: torch.Tensor,  # from encoder, to mask the source sequence
+        source_mask: torch.Tensor,  # from encoder, to mask the source sequence
         target_mask: torch.Tensor,  # from decoder, to mask the target sequence
     ) -> torch.Tensor:
         input = self.residual_connections[0](
@@ -253,7 +253,7 @@ class DecoderBlock(nn.Module):
                 query=input,
                 key=encoder_output,
                 value=encoder_output,
-                mask=src_mask,
+                mask=source_mask,
             ),
         )
         return self.residual_connections[2](
@@ -271,14 +271,14 @@ class Decoder(nn.Module):
         self,
         input: torch.Tensor,
         encoder_output: torch.Tensor,
-        src_mask: torch.Tensor,
+        source_mask: torch.Tensor,
         target_mask: torch.Tensor,
     ) -> torch.Tensor:
         for layer in self.layers:
             input = layer(
                 input=input,
                 encoder_output=encoder_output,
-                src_mask=src_mask,
+                source_mask=source_mask,
                 target_mask=target_mask,
             )  # calling the forward method of DecoderBlock
         return self.norm(input)
@@ -302,8 +302,8 @@ class Transformer(nn.Module):
         self,
         encoder: Encoder,
         decoder: Decoder,
-        src_embed: InputEmbeddings,
-        src_pos: PositionalEncodding,
+        source_embed: InputEmbeddings,
+        source_pos: PositionalEncodding,
         target_embed: InputEmbeddings,
         target_pos: PositionalEncodding,
         projection_layer: ProjectionLayer,
@@ -311,24 +311,24 @@ class Transformer(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.src_embed = src_embed
+        self.source_embed = source_embed
         self.target_embed = target_embed
-        self.src_pos = src_pos
+        self.source_pos = source_pos
         self.target_pos = target_pos
         self.projection_layer = projection_layer
 
     def encode(
-        self, src: torch.Tensor, src_mask: torch.Tensor
+        self, source: torch.Tensor, source_mask: torch.Tensor
     ) -> torch.Tensor:
-        src = self.src_embed(src)
-        src = self.src_pos(src)
-        return self.encoder(input=src, mask=src_mask)
+        source = self.source_embed(source)
+        source = self.source_pos(source)
+        return self.encoder(input=source, mask=source_mask)
 
     def decode(
         self,
-        target: torch.Tensor,
         encoder_output: torch.Tensor,
-        src_mask: torch.Tensor,
+        source_mask: torch.Tensor,
+        target: torch.Tensor,
         target_mask: torch.Tensor,
     ) -> torch.Tensor:
         target = self.target_embed(target)
@@ -336,7 +336,7 @@ class Transformer(nn.Module):
         return self.decoder(
             input=target,
             encoder_output=encoder_output,
-            src_mask=src_mask,
+            source_mask=source_mask,
             target_mask=target_mask,
         )
 
@@ -345,9 +345,9 @@ class Transformer(nn.Module):
 
 
 def build_transformer(
-    src_vocab_size: int,
+    source_vocab_size: int,
     target_vocab_size: int,
-    src_len: int,
+    sequence_length: int,
     target_sequence_len: int,
     d_model: int = 512,
     num_heads: int = 8,
@@ -357,14 +357,16 @@ def build_transformer(
     num_decoder_layers: int = 6,
 ) -> Transformer:
     # Create the embedding layers
-    src_embed = InputEmbeddings(d_model=d_model, vocab_size=src_vocab_size)
+    source_embed = InputEmbeddings(
+        d_model=d_model, vocab_size=source_vocab_size
+    )
     target_embed = InputEmbeddings(
         d_model=d_model, vocab_size=target_vocab_size
     )
 
     # Create the positional encoding layers
-    src_pos = PositionalEncodding(
-        d_model=d_model, sequence_length=src_len, dropout=dropout
+    source_pos = PositionalEncodding(
+        d_model=d_model, sequence_length=sequence_length, dropout=dropout
     )
     target_pos = PositionalEncodding(
         d_model=d_model, sequence_length=target_sequence_len, dropout=dropout
@@ -419,8 +421,8 @@ def build_transformer(
     transformer = Transformer(
         encoder=encoder,
         decoder=decoder,
-        src_embed=src_embed,
-        src_pos=src_pos,
+        source_embed=source_embed,
+        source_pos=source_pos,
         target_embed=target_embed,
         target_pos=target_pos,
         projection_layer=projection_layer,

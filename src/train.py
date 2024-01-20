@@ -36,7 +36,7 @@ def greedy_docode(
     end_of_sentence_idx = target_tokenizer.token_to_id("[EOS]")
 
     # Precompute the encoder output and resuse it
-    encoder_output = model.encode(src=source, src_mask=source_mask)
+    encoder_output = model.encode(source=source, source_mask=source_mask)
     # Initalize the decoder input with the start of sentence token
     decoder_input = (
         torch.empty(1, 1)
@@ -50,16 +50,13 @@ def greedy_docode(
 
         # Build mask for the target sequence (decoder input)
         decoder_mask = (
-            causal_mask(decoder_input.size(1))
-            .to(device)
-            .type_as(source_mask)
-            .to(device)
+            causal_mask(decoder_input.size(1)).type_as(source_mask).to(device)
         )
         # Calculate the output of the decoder
         decoder_output = model.decode(
             target=decoder_input,
             encoder_output=encoder_output,
-            src_mask=source_mask,
+            source_mask=source_mask,
             target_mask=decoder_mask,
         )
         # get the next token, after the last token we have given to the encoder
@@ -270,9 +267,9 @@ def get_model(
     config: Dict[str, Any], source_vocab_size: int, target_vocab_size: int
 ) -> Transformer:
     model = build_transformer(
-        src_vocab_size=source_vocab_size,
+        source_vocab_size=source_vocab_size,
         target_vocab_size=target_vocab_size,
-        src_len=int(config["sequence_length"]),
+        source_len=int(config["sequence_length"]),
         target_sequence_len=int(config["sequence_length"]),
         d_model=int(config["d_model"]),
     )
@@ -349,13 +346,13 @@ def train_model(config: Dict[str, str]):
 
             # Run the tensors through the transformer
             encoder_output = model.encode(
-                src=encoder_input, src_mask=encoder_mask
+                source=encoder_input, source_mask=encoder_mask
             )
             decoder_output = model.decode(
                 target=decoder_input,
                 target_mask=decoder_mask,
                 encoder_output=encoder_output,
-                src_mask=encoder_mask,
+                source_mask=encoder_mask,
             )
             project_output = model.project(input=decoder_output)
 
