@@ -15,28 +15,32 @@ class InputEmbeddings(nn.Module):
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return self.embeddings(input=input) * math.sqrt(
+        return self.embeddings(input) * math.sqrt(
             self.d_model
         )  # paper suggests to scale by sqrt(d_model)
 
 
 class PositionalEncodding(nn.Module):
-    def __init__(self, d_model: int, seq_len: int, dropout: float) -> None:
+    def __init__(
+        self, d_model: int, sequence_length: int, dropout: float
+    ) -> None:
         super().__init__()
         self.d_model = d_model
-        self.seq_len = seq_len
+        self.sequence_length = sequence_length
         self.dropout = nn.Dropout(p=dropout)
 
-        positional_encoding = torch.zeros(seq_len, d_model)
-        position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(dim=1)
+        positional_encoding = torch.zeros(sequence_length, d_model)
+        position = torch.arange(
+            0, sequence_length, dtype=torch.float
+        ).unsqueeze(dim=1)
         div_term = torch.exp(
-            input=torch.arange(start=0, end=d_model, step=2).float()
-            * (-math.log(x=10000.0) / d_model)
+            torch.arange(start=0, end=d_model, step=2).float()
+            * (-math.log(10000.0) / d_model)
         )
         # apply the sin to even positions
-        positional_encoding[:, 0::2] = torch.sin(input=position * div_term)
+        positional_encoding[:, 0::2] = torch.sin(position * div_term)
         # apply the cos to odd positions
-        positional_encoding[:, 1::2] = torch.cos(input=position * div_term)
+        positional_encoding[:, 1::2] = torch.cos(position * div_term)
 
         positional_encoding = positional_encoding.unsqueeze(dim=0)
         self.register_buffer("positional_encoding", positional_encoding)
@@ -45,7 +49,7 @@ class PositionalEncodding(nn.Module):
         pos_enc = input + (
             self.positional_encoding[:, : input.shape[1], :]
         ).requires_grad_(False)
-        return self.dropout(input=pos_enc)
+        return self.dropout(pos_enc)
 
 
 class LayerNormalization(nn.Module):
@@ -75,13 +79,13 @@ class FeedForwardBlock(nn.Module):
         )  # W2 and B2
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # (Batch, seq_len, d_model)
-        # -> (Batch, seq_len, d_ff)
-        # -> (Batch, seq_len, d_model)
-        lin1_out = self.linear1(input=input)
-        relu_out = torch.relu(input=lin1_out)
-        drop_out = self.dropout(input=relu_out)
-        return self.linear2(input=drop_out)
+        # (Batch, sequence_length, d_model)
+        # -> (Batch, sequence_length, d_ff)
+        # -> (Batch, sequence_length, d_model)
+        lin1_out = self.linear1(input)
+        relu_out = torch.relu(lin1_out)
+        drop_out = self.dropout(relu_out)
+        return self.linear2(drop_out)
 
 
 class MultiHeadAttentionBlock(nn.Module):
@@ -116,13 +120,13 @@ class MultiHeadAttentionBlock(nn.Module):
         ) / math.sqrt(d_k)
         if mask is not None:
             attention_scores = attention_scores.masked_fill(
-                mask=mask == 0, value=-1e9
+                mask=(mask == 0), value=-1e9
             )
         attention_scores = torch.softmax(
-            input=attention_scores, dim=-1
-        )  # (Batch, num_heads, seq_len, seq_len)
+            attention_scores, dim=-1
+        )  # (Batch, num_heads, sequence_length, sequence_length)
         if dropout is not None:
-            attention_scores = dropout(p=attention_scores)
+            attention_scores = dropout(attention_scores)
 
         return attention_scores @ value, attention_scores
 
@@ -133,9 +137,9 @@ class MultiHeadAttentionBlock(nn.Module):
         value: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
-        query = self.w_q(input=query)
-        key = self.w_k(input=key)
-        value = self.w_v(input=value)
+        query = self.w_q(query)
+        key = self.w_k(key)
+        value = self.w_v(value)
 
         query = query.view(
             query.shape[0], query.shape[1], self.num_heads, self.d_k
@@ -171,7 +175,7 @@ class ResidualConnection(nn.Module):
         # The sublayer is either the MultiHeadAttentionBlock
         # or the FeedForwardBlock, both of which are nn.Module
         # We do this to apply skip connection to both of them
-        return input + self.dropout(input=sublayer(self.norm(input=input)))
+        return input + self.dropout(sublayer(self.norm(input)))
 
 
 class EncoderBlock(nn.Module):
@@ -211,7 +215,7 @@ class Encoder(nn.Module):
     def forward(self, input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             input = layer(input=input, src_mask=mask)
-        return self.norm(input=input)
+        return self.norm(input)
 
 
 class DecoderBlock(nn.Module):
@@ -277,7 +281,7 @@ class Decoder(nn.Module):
                 src_mask=src_mask,
                 target_mask=target_mask,
             )  # calling the forward method of DecoderBlock
-        return self.norm(input=input)
+        return self.norm(input)
 
 
 class ProjectionLayer(nn.Module):
@@ -289,7 +293,7 @@ class ProjectionLayer(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return torch.log_softmax(
-            input=self.linear(input=input), dim=-1
+            input=self.linear(input), dim=-1
         )  # for numerical stability
 
 
@@ -316,9 +320,9 @@ class Transformer(nn.Module):
     def encode(
         self, src: torch.Tensor, src_mask: torch.Tensor
     ) -> torch.Tensor:
-        src = self.src_embed(input=src)
-        src = self.src_pos(input=src)
-        return self.encoder(input == src, mask=src_mask)
+        src = self.src_embed(src)
+        src = self.src_pos(src)
+        return self.encoder(input=src, mask=src_mask)
 
     def decode(
         self,
@@ -337,14 +341,14 @@ class Transformer(nn.Module):
         )
 
     def project(self, input: torch.Tensor) -> torch.Tensor:
-        return self.projection_layer(input=input)
+        return self.projection_layer(input)
 
 
 def build_transformer(
     src_vocab_size: int,
     target_vocab_size: int,
     src_len: int,
-    target_sq_len: int,
+    target_sequence_len: int,
     d_model: int = 512,
     num_heads: int = 8,
     dropout: float = 0.1,
@@ -360,10 +364,10 @@ def build_transformer(
 
     # Create the positional encoding layers
     src_pos = PositionalEncodding(
-        d_model=d_model, seq_len=src_len, dropout=dropout
+        d_model=d_model, sequence_length=src_len, dropout=dropout
     )
     target_pos = PositionalEncodding(
-        d_model=d_model, seq_len=target_sq_len, dropout=dropout
+        d_model=d_model, sequence_length=target_sequence_len, dropout=dropout
     )
 
     # Create the encoder blocks

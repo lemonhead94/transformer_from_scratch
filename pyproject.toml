@@ -33,6 +33,10 @@ ignore = ["E203", "E501"] # Black takes care of line-too-long
 [tool.poetry.dependencies]
 python = "^3.9"
 torch = "^2.1.2"
+datasets = "^2.16.1"
+tokenizers = "^0.15.0"
+tensorboard = "^2.15.1"
+torchmetrics = "^1.3.0.post0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.13"
