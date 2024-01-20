@@ -354,6 +354,7 @@ def train_model(config: Dict[str, str]):
         )
         for batch in batch_iterator:
             model.train()
+
             encoder_input = batch["encoder_input"].to(device)
             decoder_input = batch["decoder_input"].to(device)
             encoder_mask = batch["encoder_mask"].to(device)
@@ -393,20 +394,34 @@ def train_model(config: Dict[str, str]):
             # Update the weights
             optimizer.step()
             optimizer.zero_grad()
-
-            run_validation(
-                model=model,
-                validation_dataloader=validation_dataloader,
-                target_tokenizer=target_tokenizer,
-                max_len=int(config["sequence_length"]),
-                device=device,
-                print_message=batch_iterator.write,
-                global_step=global_step,
-                writer=writer,
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("DEBUG: run_validation")
+                # run validation after each step
+                run_validation(
+                    model=model,
+                    validation_dataloader=validation_dataloader,
+                    target_tokenizer=target_tokenizer,
+                    max_len=int(config["sequence_length"]),
+                    device=device,
+                    print_message=batch_iterator.write,
+                    global_step=global_step,
+                    writer=writer,
+                )
 
             # Update the global step
             global_step += 1
+
+        # Run validation after each epoch
+        run_validation(
+            model=model,
+            validation_dataloader=validation_dataloader,
+            target_tokenizer=target_tokenizer,
+            max_len=int(config["sequence_length"]),
+            device=device,
+            print_message=batch_iterator.write,
+            global_step=global_step,
+            writer=writer,
+        )
 
         # Save the model
         model_filename = get_weights_file_path(
