@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 import torch
-import wandb
 from datasets import load_dataset
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
@@ -15,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from torchmetrics.text import BLEUScore, CharErrorRate, WordErrorRate
 from tqdm import tqdm
 
+import wandb
 from src.config import get_config, get_weights_file_path
 from src.dataset import BilingualDataset, causal_mask
 from src.model import Transformer, build_transformer

@@ -7,15 +7,15 @@ def get_config():
         "batch_size": 8,
         "number_of_epochs": 20,
         "learning_rate": 10**-4,
-        "sequence_length": 480,
+        "sequence_length": 482,
         "embedding_dimension": 512,
         "source_language": "de",
         "target_language": "en",
         "model_folder": "weights",
-        "model_filename": "tmodel_",
         "preload": None,
         "tokenizer_file": "tokenizer_data/tokenizer_{0}.json",
         "experiment_name": "runs/tmodel",
+        "model_basename": "tmodel_",
     }
 
 
